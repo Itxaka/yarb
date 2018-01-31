@@ -12,39 +12,21 @@ class TestQueues(unittest.TestCase):
     def setUpClass(cls):
 
         cls.balanced_queue_list = {
-            "node1": {
-                "q1", "q2", "q3"
-            },
-            "node2": {
-                "q4", "q5", "q6"
-            },
-            "node3": {
-                "q7", "q8", "q9"
-            }
+            "node1": ["q1", "q2", "q3"],
+            "node2": ["q4", "q5", "q6"],
+            "node3": ["q7", "q8", "q9"]
         }
 
         cls.unbalanced_queue_list = {
-            "node1": {
-                "q1", "q2", "q3", "q4", "q5", "q6", "q7"
-            },
-            "node2": {
-                "q8"
-            },
-            "node3": {
-                "q9"
-            }
+            "node1": ["q1", "q2", "q3", "q4", "q5", "q6", "q7"],
+            "node2": ["q8"],
+            "node3": ["q9"]
         }
 
         cls.unbalanced_par_queue_list = {
-            "node1": {
-                "q1", "q2", "q3", "q4", "q5", "q6", "q7"
-            },
-            "node2": {
-                "q8"
-            },
-            "node3": {
-                "q9", "q10"
-            }
+            "node1": ["q1", "q2", "q3", "q4", "q5", "q6", "q7"],
+            "node2": ["q8"],
+            "node3": ["q9", "q10"]
         }
 
         cls.queues_list = [
@@ -92,13 +74,17 @@ class TestQueues(unittest.TestCase):
         # from http api list to nice dictionary
         self.assertEqual(self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]})
 
-    @unittest.skip("method changed but test not updated yet")
     def test_queue_pool(self):
         # should raise IndexError as the queue is empty
         self.assertRaises(IndexError, self.balancer.queue_pool.pop)
-        self.balancer.fill_queue_with_overloaded_nodes({"node1": 10, "node2": 0, "node3": -10})
-        # should be able to pop
-        self.assertEqual(self.balancer.queue_pool.pop(), {"node1": 10})
+        self.balancer.fill_queue_with_overloaded_nodes(self.unbalanced_queue_list, {"node1": 4, "node2": -2, "node3": -2})
+        # should have inserted the q1 to q4 queues
+        self.assertEqual(self.balancer.queue_pool.popleft(), "q1")
+        self.assertEqual(self.balancer.queue_pool.popleft(), "q2")
+        self.assertEqual(self.balancer.queue_pool.popleft(), "q3")
+        self.assertEqual(self.balancer.queue_pool.popleft(), "q4")
+        # should not be anything else in the queue left
+        self.assertRaises(IndexError, self.balancer.queue_pool.popleft)
 
     def test_destination_pool(self):
         # should raise IndexError as the queue is empty
