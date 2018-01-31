@@ -9,8 +9,10 @@ try:
 except ImportError:
     from queue import deque
 import copy
-from future.utils import iteritems
-from builtins import range
+try:
+    from builtins import range
+except ImportError:
+    from __builtin__ import range
 import logging
 
 
@@ -50,7 +52,9 @@ class QueueBalancer:
         self.log.debug("Got username {}".format(username))
 
         # params for http api user
-        self.auth = (username, password)
+        self.conn = requests.Session()
+        self.conn.auth = (username, password)
+        self.conn.headers = {"content-type": "application/json"}
         full_host = "http://{}:{}".format(hostname, port)
         self.nodes_url = "{}/api/nodes".format(full_host)
         self.queues_url = "{}/api/queues/{}".format(full_host, vhost)
@@ -102,8 +106,8 @@ class QueueBalancer:
         return "{}-balancer-temp".format(queue_name)
 
     def get_queues(self):
-        response = requests.get(self.queues_url, auth=self.auth).json()
-        self.log.debug("Returning response: {}".format(response))
+        response = self.conn.get(self.queues_url).json()
+        #self.log.debug("Returning response: {}".format(response))
         return response
 
     def ordered_queue_list(self):
@@ -136,7 +140,7 @@ class QueueBalancer:
 
     def fill_queue_with_overloaded_nodes(self, queues_ordered_by_host, distribution):
         # type: (dict) -> None
-        for node, extra_queues in iteritems(distribution):
+        for node, extra_queues in distribution.items():
             if extra_queues > 0:
                 self.log.debug("Found that node {} has {} extra queues, adding to queue pool".format(node, extra_queues))
                 for q in range(0, extra_queues):
@@ -144,7 +148,7 @@ class QueueBalancer:
 
     def fill_queue_with_destination_nodes(self, distribution):
         # type: (dict) -> None
-        for node, extra_queues in iteritems(distribution):
+        for node, extra_queues in distribution.items():
             if extra_queues < 0:
                 self.log.debug(
                     "Found that node {} has {} missing queues, adding to destiny pool".format(node, abs(extra_queues))
@@ -159,44 +163,65 @@ class QueueBalancer:
         data["pattern"] = "^{}$".format(queue_name)
         self.log.debug("Applying first policy to {}: {}".format(queue_name, data))
         # move policy to just 1 mirror (so no slaves)
-        requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
+        r = self.conn.put(self.policy_url.format(policy_name), json=data)
+        self.log.debug("Got response from first policy change: {}".format(r.json()))
         data = copy.deepcopy(self.policy_new_master)
         data["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
         self.log.debug("Applying second policy to {}: {}".format(queue_name, data))
         # move queue into its new master
-        requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
+        self.conn.put(self.policy_url.format(policy_name), json=data)
 
     def delete_policy(self, queue_name):
         policy_name = self.policy_name(queue_name)
         self.log.debug("Deleting policy {}".format(policy_name))
-        requests.delete(self.policy_url.format(policy_name), auth=self.auth)
+        response = self.conn.delete(self.policy_url.format(policy_name)).json()
+        self.log.debug("Response of delete_policy: {}".format(response))
 
     def check_status(self, queue_name):
-        return requests.get(self.queue_status_url.format(queue_name), auth=self.auth).json()
+        response = self.conn.get(self.queue_status_url.format(queue_name)).json()
+        self.log.debug("Status: {}".format(response))
+        return response
 
     def sync_queue(self, queue_name):
-        requests.post(self.sync_url.format(queue_name), json={"action": "sync"}, auth=self.auth)
+        response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"}).json()
+        self.log.debug("Response from sync_queue: {}".format(response))
+
+    def prepare(self):
+        # get ordered queues
+        queues = self.ordered_queue_list()
+        # obtain the optimal distribution
+        distribution = self.calculate_queue_distribution(queues)
+        # fill the overloaded pool
+        self.fill_queue_with_overloaded_nodes(queues, distribution)
+        # fill the destination pool
+        self.fill_queue_with_destination_nodes(distribution)
 
     def go(self):
         self.log.debug("Starting queue balancing")
-        # TODO: main, order below
-        # get queues
-        # order them
-        # obtain the optimal distribution
-        # fill the overloaded pool
-        # fill the destination pool
+        self.prepare()
+        # start threading here
+        self.log.debug("Queue pool has {} items".format(len(self.queue_pool)))
+        self.log.debug("Destination pool has {} items".format(len(self.destiny_pool)))
         # pop queue from the overloaded pool
+        q = self.queue_pool.pop()
         # pop node from the destiny pool
+        n = self.destiny_pool.pop()
         # apply policy to queue
+        self.apply_policy(q, n)
         # sync queue? not sure if needed, may be needed on high loads but it can introduce more load
+        self.sync_queue(q)
         # check queue status, slaves should be empty, queue should be moved to new node
+        status = self.check_status(q)
         # delete policy
+        self.delete_policy(q)
         # check queue status? or leave it to rabbit to sync itself? (it does sync itself, it takes a couple of seconds)
+        status = self.check_status(q)
         # add some error catching to reinsert the target into the destiny pool if something fails
         # do the same for the overloaded? maybe we should just ignore the errors for now? it should be ok to relaunch
         # this several times so no biggie
 
 
 if __name__ == '__main__':
-    pass
+    q = QueueBalancer()
+    q.go()
