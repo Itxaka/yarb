@@ -5,6 +5,7 @@ except ImportError:
     from unittest.mock import Mock, patch, mock_open
 from main import QueueBalancer
 import io
+from builtins import range
 
 
 class TestQueues(unittest.TestCase):
@@ -79,10 +80,11 @@ class TestQueues(unittest.TestCase):
         self.assertRaises(IndexError, self.balancer.queue_pool.pop)
         self.balancer.fill_queue_with_overloaded_nodes(self.unbalanced_queue_list, {"node1": 4, "node2": -2, "node3": -2})
         # should have inserted the q1 to q4 queues
-        self.assertEqual(self.balancer.queue_pool.popleft(), "q1")
-        self.assertEqual(self.balancer.queue_pool.popleft(), "q2")
-        self.assertEqual(self.balancer.queue_pool.popleft(), "q3")
-        self.assertEqual(self.balancer.queue_pool.popleft(), "q4")
+        queues = [self.balancer.queue_pool.pop() for _ in range(0, 4)]
+        self.assertIn("q1", queues)
+        self.assertIn("q2", queues)
+        self.assertIn("q3", queues)
+        self.assertIn("q4", queues)
         # should not be anything else in the queue left
         self.assertRaises(IndexError, self.balancer.queue_pool.popleft)
 
@@ -91,11 +93,11 @@ class TestQueues(unittest.TestCase):
         self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
         self.balancer.fill_queue_with_destination_nodes({"node1": 5, "node2": 0, "node3": -4, "node4": -1})
         # should have inserted node3 4 times and node4 once
-        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
-        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
-        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
-        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
-        self.assertEqual(self.balancer.destiny_pool.popleft(), "node4")
+        nodes = [self.balancer.destiny_pool.pop() for _ in range(0, 5)]
+        self.assertIn("node3", nodes)
+        self.assertEqual(4, len([n for n in nodes if n == "node3"]))
+        self.assertIn("node4", nodes)
+        self.assertEqual(1, len([n for n in nodes if n == "node4"]))
         # should raise IndexError as the queue is empty
         self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
 
