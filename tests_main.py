@@ -51,21 +51,21 @@ class TestQueues(unittest.TestCase):
         """
         should not calculate anything if they are already balanced
         """
-        distributed = QueueBalancer.calculate_queue_distribution(self.balanced_queue_list)
+        distributed = self.balancer.calculate_queue_distribution(self.balanced_queue_list)
         self.assertEqual(distributed, {"node1": 0, "node2": 0, "node3": 0})
 
     def test_distribution_with_unbalanced_queues(self):
         """
         should properly calculate the distribution
         """
-        distributed = QueueBalancer.calculate_queue_distribution(self.unbalanced_queue_list)
+        distributed = self.balancer.calculate_queue_distribution(self.unbalanced_queue_list)
         self.assertEqual(distributed, {"node1": 4, "node2": -2, "node3": -2})
 
     def test_distribution_returns_integers_even_if_unbalanced(self):
         """
         should not fail and return integers
         """
-        distributed = QueueBalancer.calculate_queue_distribution(self.unbalanced_par_queue_list)
+        distributed = self.balancer.calculate_queue_distribution(self.unbalanced_par_queue_list)
         for k in distributed.keys():
             self.assertIs(type(distributed[k]), int)
 

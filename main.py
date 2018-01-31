@@ -1,8 +1,8 @@
 import requests
 try:
-    from ConfigParser import ConfigParser
+    from ConfigParser import ConfigParser, NoOptionError
 except ImportError:
-    from configparser import ConfigParser
+    from configparser import ConfigParser, NoOptionError
 from os.path import expanduser
 try:
     from Queue import deque
@@ -11,6 +11,7 @@ except ImportError:
 import copy
 from future.utils import iteritems
 from builtins import range
+import logging
 
 
 class ConfigNotFound(Exception):
@@ -19,6 +20,13 @@ class ConfigNotFound(Exception):
 
 class QueueBalancer:
     def __init__(self):
+        self.log = logging.getLogger(__name__)
+        ch = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(process)d - %(levelname)s - %(funcName)s - %(message)s')
+        ch.setFormatter(formatter)
+        self.log.addHandler(ch)
+        levels = {"debug": logging.DEBUG, "info": logging.INFO}
+
         config = self.load_config()
         username = config.get("default", "username")
         password = config.get("default", "password")
@@ -27,6 +35,19 @@ class QueueBalancer:
         vhost = vhost.replace("/", "%2f")
         hostname = config.get("default", "hostname")
         port = config.get("default", "port")
+
+        try:
+            log_level = config.get("default", "log_level")
+        except NoOptionError:
+            log_level = "info"
+
+        self.log.setLevel(levels.get(log_level, logging.INFO))
+
+        self.log.debug("Starting program")
+        self.log.debug("Got hostname {}".format(hostname))
+        self.log.debug("Got vhost {}".format(vhost))
+        self.log.debug("Got port {}".format(port))
+        self.log.debug("Got username {}".format(username))
 
         # params for http api user
         self.auth = (username, password)
@@ -52,23 +73,25 @@ class QueueBalancer:
 
         # queue to store the nodes that have extra queues on them
         self.queue_pool = deque()
+        self.log.debug("Created queue pool: {}".format(self.queue_pool))
 
         # destiny pool is a more simple deque which contains the target nodes for moving the queues to
         # the values are calculated as above but this are the ones that get a negative value, indicating
         # that they are missing a number of queues to reach the optimal balance(tm)
         # queue to store the nodes that are the destination for extra queues
         self.destiny_pool = deque()
+        self.log.debug("Created destiny pool: {}".format(self.destiny_pool))
         # for easy of use (note(itxaka): for whom? for what?)
         self.config = config
 
-    @staticmethod
-    def load_config():
+    def load_config(self):
         config_file = expanduser("~/.queue_balancer.conf")
         config = ConfigParser()
 
         try:
             with open(config_file) as f:
                 config.readfp(f)
+                self.log.debug("Config loaded")
         except IOError:
             raise ConfigNotFound("File {} with the config not found.".format(config_file))
 
@@ -79,7 +102,9 @@ class QueueBalancer:
         return "{}-balancer-temp".format(queue_name)
 
     def get_queues(self):
-        return requests.get(self.queues_url, auth=self.auth).json()
+        response = requests.get(self.queues_url, auth=self.auth).json()
+        self.log.debug("Returning response: {}".format(response))
+        return response
 
     def ordered_queue_list(self):
         # type: (None) -> dict
@@ -95,8 +120,7 @@ class QueueBalancer:
                 queues_ordered_by_host[q["node"]] = [q["name"]]
         return queues_ordered_by_host
 
-    @staticmethod
-    def calculate_queue_distribution(queue_list):
+    def calculate_queue_distribution(self, queue_list):
         # type: (dict) -> dict
         """
         calculates the difference in queues between nodes
@@ -107,12 +131,14 @@ class QueueBalancer:
         proper_distribution = {}
         for node in queue_list:
             proper_distribution[node] = int(len(queue_list[node]) - (total_queues / len(queue_list.keys())))
+        self.log.debug("Optimal distribution calculated is: {}".format(proper_distribution))
         return proper_distribution
 
     def fill_queue_with_overloaded_nodes(self, queues_ordered_by_host, distribution):
         # type: (dict) -> None
         for node, extra_queues in iteritems(distribution):
             if extra_queues > 0:
+                self.log.debug("Found that node {} has {} extra queues, adding to queue pool".format(node, extra_queues))
                 for q in range(0, extra_queues):
                     self.queue_pool.append(queues_ordered_by_host[node][q])
 
@@ -120,6 +146,9 @@ class QueueBalancer:
         # type: (dict) -> None
         for node, extra_queues in iteritems(distribution):
             if extra_queues < 0:
+                self.log.debug(
+                    "Found that node {} has {} missing queues, adding to destiny pool".format(node, abs(extra_queues))
+                )
                 for q in range(extra_queues, 0):
                     self.destiny_pool.append(node)
 
@@ -128,16 +157,19 @@ class QueueBalancer:
         # copy, not reference as we are changing it
         data = copy.deepcopy(self.policy_create)
         data["pattern"] = "^{}$".format(queue_name)
+        self.log.debug("Applying first policy to {}: {}".format(queue_name, data))
         # move policy to just 1 mirror (so no slaves)
         requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
         data = copy.deepcopy(self.policy_new_master)
         data["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
+        self.log.debug("Applying second policy to {}: {}".format(queue_name, data))
         # move queue into its new master
         requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
 
     def delete_policy(self, queue_name):
         policy_name = self.policy_name(queue_name)
+        self.log.debug("Deleting policy {}".format(policy_name))
         requests.delete(self.policy_url.format(policy_name), auth=self.auth)
 
     def check_status(self, queue_name):
@@ -147,6 +179,7 @@ class QueueBalancer:
         requests.post(self.sync_url.format(queue_name), json={"action": "sync"}, auth=self.auth)
 
     def go(self):
+        self.log.debug("Starting queue balancing")
         # TODO: main, order below
         # get queues
         # order them
@@ -163,7 +196,6 @@ class QueueBalancer:
         # add some error catching to reinsert the target into the destiny pool if something fails
         # do the same for the overloaded? maybe we should just ignore the errors for now? it should be ok to relaunch
         # this several times so no biggie
-        pass
 
 
 if __name__ == '__main__':
