@@ -120,9 +120,8 @@ class QueueBalancer:
         # type: (dict) -> None
         for node, extra_queues in iteritems(distribution):
             if extra_queues < 0:
-                self.destiny_pool.append({node: extra_queues})
-                # TODO: do the same as above, but insert the name of the target node as many times
-                # as extra_queues. That will indicate how many queues we can insert in that node
+                for q in range(extra_queues, 0):
+                    self.destiny_pool.append(node)
 
     def apply_policy(self, queue_name, target):
         policy_name = self.policy_name(queue_name)

@@ -88,10 +88,16 @@ class TestQueues(unittest.TestCase):
 
     def test_destination_pool(self):
         # should raise IndexError as the queue is empty
-        self.assertRaises(IndexError, self.balancer.queue_pool.pop)
-        self.balancer.fill_queue_with_destination_nodes({"node1": 10, "node2": 0, "node3": -10})
-        # should be able to pop
-        self.assertEqual(self.balancer.destiny_pool.pop(), {"node3": -10})
+        self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
+        self.balancer.fill_queue_with_destination_nodes({"node1": 5, "node2": 0, "node3": -4, "node4": -1})
+        # should have inserted node3 4 times and node4 once
+        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
+        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
+        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
+        self.assertEqual(self.balancer.destiny_pool.popleft(), "node3")
+        self.assertEqual(self.balancer.destiny_pool.popleft(), "node4")
+        # should raise IndexError as the queue is empty
+        self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
 
 
 if __name__ == '__main__':
