@@ -1,5 +1,8 @@
 import unittest
-from mock import Mock, patch, mock_open
+try:
+    from mock import Mock, patch, mock_open
+except ImportError:
+    from unittest.mock import Mock, patch, mock_open
 from main import QueueBalancer
 import io
 

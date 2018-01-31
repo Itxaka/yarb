@@ -4,7 +4,10 @@ try:
 except ImportError:
     from configparser import ConfigParser
 from os.path import expanduser
-from Queue import deque
+try:
+    from Queue import deque
+except ImportError:
+    from queue import deque
 import copy
 
 
