@@ -1,3 +1,5 @@
+from time import sleep
+
 import requests
 try:
     from ConfigParser import ConfigParser, NoOptionError
@@ -62,8 +64,8 @@ class QueueBalancer:
         self.policy_url = "{}/api/policies/{}".format(full_host, vhost) + "/{}"
         self.sync_url = "{}/api/queues/{}".format(full_host, vhost) + "/{}/actions"
 
-        self.policy_create = {"pattern": "", "ha-mode": "exactly", "ha-params": 1, "priority": 990, "apply-to": "queues"}
-        self.policy_new_master = {"pattern": "", "ha-mode": "nodes", "ha-params": [], "priority": 992, "apply-to": "queues"}
+        self.policy_create = {"pattern": "", "definition": {"ha-mode": "exactly", "ha-params": 1}, "priority": 990, "apply-to": "queues"}
+        self.policy_new_master = {"pattern": "", "definition": {"ha-mode": "nodes", "ha-params": []}, "priority": 992, "apply-to": "queues"}
 
         # using deqes to sync all the things
         # queue_pool is a deqe where the "extra" queues go. Extra queues mean, queues that should not be in that node
@@ -164,9 +166,13 @@ class QueueBalancer:
         self.log.debug("Applying first policy to {}: {}".format(queue_name, data))
         # move policy to just 1 mirror (so no slaves)
         r = self.conn.put(self.policy_url.format(policy_name), json=data)
-        self.log.debug("Got response from first policy change: {}".format(r.json()))
+        self.log.debug("Got response from first policy change: {}".format(r.status_code))
+        self.sync_queue(queue_name)
+        while len(self.check_status(queue_name)["slave_nodes"]) > 0:
+            self.log.debug("Queue {} still not ready".format(queue_name))
+            sleep(2)
         data = copy.deepcopy(self.policy_new_master)
-        data["ha-params"] = [target]
+        data["definition"]["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
         self.log.debug("Applying second policy to {}: {}".format(queue_name, data))
         # move queue into its new master
@@ -175,8 +181,8 @@ class QueueBalancer:
     def delete_policy(self, queue_name):
         policy_name = self.policy_name(queue_name)
         self.log.debug("Deleting policy {}".format(policy_name))
-        response = self.conn.delete(self.policy_url.format(policy_name)).json()
-        self.log.debug("Response of delete_policy: {}".format(response))
+        response = self.conn.delete(self.policy_url.format(policy_name))
+        self.log.debug("Response of delete_policy: {}".format(response.status_code))
 
     def check_status(self, queue_name):
         response = self.conn.get(self.queue_status_url.format(queue_name)).json()
@@ -184,8 +190,8 @@ class QueueBalancer:
         return response
 
     def sync_queue(self, queue_name):
-        response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"}).json()
-        self.log.debug("Response from sync_queue: {}".format(response))
+        response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"})
+        self.log.debug("Response from sync_queue: {}".format(response.status_code))
 
     def prepare(self):
         # get ordered queues
