@@ -1,5 +1,8 @@
 import requests
-from ConfigParser import ConfigParser
+try:
+    from ConfigParser import ConfigParser as configparser
+except ImportError:
+    from configparser import configparser
 from os.path import expanduser
 from Queue import deque
 import copy
@@ -56,7 +59,7 @@ class QueueBalancer:
     @staticmethod
     def load_config():
         config_file = expanduser("~/.queue_balancer.conf")
-        config = ConfigParser()
+        config = configparser()
 
         try:
             with open(config_file) as f:
