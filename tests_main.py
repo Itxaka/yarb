@@ -69,14 +69,14 @@ class TestQueues(unittest.TestCase):
         should not calculate anything if they are already balanced
         """
         distributed = QueueBalancer.calculate_queue_distribution(self.balanced_queue_list)
-        self.assertEquals(distributed, {"node1": 0, "node2": 0, "node3": 0})
+        self.assertEqual(distributed, {"node1": 0, "node2": 0, "node3": 0})
 
     def test_distribution_with_unbalanced_queues(self):
         """
         should properly calculate the distribution
         """
         distributed = QueueBalancer.calculate_queue_distribution(self.unbalanced_queue_list)
-        self.assertEquals(distributed, {"node1": 4, "node2": -2, "node3": -2})
+        self.assertEqual(distributed, {"node1": 4, "node2": -2, "node3": -2})
 
     def test_distribution_returns_integers_even_if_unbalanced(self):
         """
@@ -90,7 +90,7 @@ class TestQueues(unittest.TestCase):
     def test_ordered_queue_list(self, get_queues_mock):
         get_queues_mock.return_value = self.queues_list
         # from http api list to nice dictionary
-        self.assertEquals(self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]})
+        self.assertEqual(self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]})
 
     @unittest.skip("method changed but test not updated yet")
     def test_queue_pool(self):
@@ -98,14 +98,14 @@ class TestQueues(unittest.TestCase):
         self.assertRaises(IndexError, self.balancer.queue_pool.pop)
         self.balancer.fill_queue_with_overloaded_nodes({"node1": 10, "node2": 0, "node3": -10})
         # should be able to pop
-        self.assertEquals(self.balancer.queue_pool.pop(), {"node1": 10})
+        self.assertEqual(self.balancer.queue_pool.pop(), {"node1": 10})
 
     def test_destination_pool(self):
         # should raise IndexError as the queue is empty
         self.assertRaises(IndexError, self.balancer.queue_pool.pop)
         self.balancer.fill_queue_with_destination_nodes({"node1": 10, "node2": 0, "node3": -10})
         # should be able to pop
-        self.assertEquals(self.balancer.destiny_pool.pop(), {"node3": -10})
+        self.assertEqual(self.balancer.destiny_pool.pop(), {"node3": -10})
 
 
 if __name__ == '__main__':

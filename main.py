@@ -9,6 +9,8 @@ try:
 except ImportError:
     from queue import deque
 import copy
+from future.utils import iteritems
+from builtins import range
 
 
 class ConfigNotFound(Exception):
@@ -104,20 +106,19 @@ class QueueBalancer:
         total_queues = sum([len(queue_list[i]) for i in queue_list])
         proper_distribution = {}
         for node in queue_list:
-            proper_distribution[node] = len(queue_list[node]) - (total_queues / len(queue_list.keys()))
-
+            proper_distribution[node] = int(len(queue_list[node]) - (total_queues / len(queue_list.keys())))
         return proper_distribution
 
     def fill_queue_with_overloaded_nodes(self, queues_ordered_by_host, distribution):
         # type: (dict) -> None
-        for node, extra_queues in distribution.iteritems():
+        for node, extra_queues in iteritems(distribution):
             if extra_queues > 0:
-                for q in xrange(0, extra_queues):
+                for q in range(0, extra_queues):
                     self.queue_pool.append(queues_ordered_by_host[node][q])
 
     def fill_queue_with_destination_nodes(self, distribution):
         # type: (dict) -> None
-        for node, extra_queues in distribution.iteritems():
+        for node, extra_queues in iteritems(distribution):
             if extra_queues < 0:
                 self.destiny_pool.append({node: extra_queues})
                 # TODO: do the same as above, but insert the name of the target node as many times
