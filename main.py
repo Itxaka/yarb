@@ -127,12 +127,12 @@ class QueueBalancer:
         policy_name = self.policy_name(queue_name)
         # copy, not reference as we are changing it
         data = copy.deepcopy(self.policy_create)
-        data["pattern"] = "^{}$".format(policy_name)
+        data["pattern"] = "^{}$".format(queue_name)
         # move policy to just 1 mirror (so no slaves)
         requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
         data = copy.deepcopy(self.policy_new_master)
         data["ha-params"] = [target]
-        data["pattern"] = "^{}$".format(policy_name)
+        data["pattern"] = "^{}$".format(queue_name)
         # move queue into its new master
         requests.put(self.policy_url.format(policy_name), json=data, auth=self.auth)
 
