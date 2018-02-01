@@ -16,6 +16,7 @@ try:
 except ImportError:
     from __builtin__ import range
 import logging
+import threading
 
 
 class ConfigNotFound(Exception):
@@ -26,7 +27,7 @@ class QueueBalancer:
     def __init__(self):
         self.log = logging.getLogger(__name__)
         ch = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(process)d - %(levelname)s - %(funcName)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - %(thread)d - %(levelname)s - %(funcName)s - %(message)s')
         ch.setFormatter(formatter)
         self.log.addHandler(ch)
         levels = {"debug": logging.DEBUG, "info": logging.INFO}
@@ -46,6 +47,7 @@ class QueueBalancer:
             log_level = "info"
 
         self.log.setLevel(levels.get(log_level, logging.INFO))
+        self.semaphore = threading.Semaphore(10)
 
         self.log.debug("Starting program")
         self.log.debug("Got hostname {}".format(hostname))
@@ -158,7 +160,7 @@ class QueueBalancer:
                 for q in range(extra_queues, 0):
                     self.destiny_pool.append(node)
 
-    def apply_policy(self, queue_name, target):
+    def apply_first_policy(self, queue_name):
         policy_name = self.policy_name(queue_name)
         # copy, not reference as we are changing it
         data = copy.deepcopy(self.policy_create)
@@ -167,16 +169,27 @@ class QueueBalancer:
         # move policy to just 1 mirror (so no slaves)
         r = self.conn.put(self.policy_url.format(policy_name), json=data)
         self.log.debug("Got response from first policy change: {}".format(r.status_code))
+
+    def wait_until_slave_nodes_gone(self, queue_name):
         self.sync_queue(queue_name)
         while len(self.check_status(queue_name)["slave_nodes"]) > 0:
             self.log.debug("Queue {} still not ready".format(queue_name))
-            sleep(2)
+            sleep(1)
+
+    def apply_second_policy(self, queue_name, target):
+        policy_name = self.policy_name(queue_name)
         data = copy.deepcopy(self.policy_new_master)
         data["definition"]["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
         self.log.debug("Applying second policy to {}: {}".format(queue_name, data))
         # move queue into its new master
         self.conn.put(self.policy_url.format(policy_name), json=data)
+
+    def wait_until_queue_moved_to_new_master(self, queue_name, target):
+        self.sync_queue(queue_name)
+        while self.check_status(queue_name)["node"] != target:
+            self.log.debug("Queue {} still not moved to {}".format(queue_name, target))
+            sleep(1)
 
     def delete_policy(self, queue_name):
         policy_name = self.policy_name(queue_name)
@@ -186,7 +199,7 @@ class QueueBalancer:
 
     def check_status(self, queue_name):
         response = self.conn.get(self.queue_status_url.format(queue_name)).json()
-        self.log.debug("Status: {}".format(response))
+        #self.log.debug("Status: {}".format(response))
         return response
 
     def sync_queue(self, queue_name):
@@ -203,29 +216,51 @@ class QueueBalancer:
         # fill the destination pool
         self.fill_queue_with_destination_nodes(distribution)
 
+    def move_queue(self):
+        try:
+            # pop queue from the overloaded pool
+            queue = self.queue_pool.pop()
+        except IndexError:
+            self.log.info("No more queues in the overloaded pool")
+            return
+        try:
+            # pop node from the destiny pool
+            target = self.destiny_pool.pop()
+        except IndexError:
+            self.log.info("No more nodes in the destination pool")
+            return
+        # apply first policy to queue
+        self.apply_first_policy(queue)
+        # sync queue until slave_pids value is empty
+        self.wait_until_slave_nodes_gone(queue)
+        # check queue status, slaves should be empty, queue should be moved to new node
+        self.apply_second_policy(queue, target)
+        # wait until the queue has moved to the new master
+        self.wait_until_queue_moved_to_new_master(queue, target)
+        # delete policy
+        self.delete_policy(queue)
+        self.semaphore.release()
+
     def go(self):
         self.log.debug("Starting queue balancing")
         self.prepare()
-        # start threading here
         self.log.debug("Queue pool has {} items".format(len(self.queue_pool)))
         self.log.debug("Destination pool has {} items".format(len(self.destiny_pool)))
-        # pop queue from the overloaded pool
-        q = self.queue_pool.pop()
-        # pop node from the destiny pool
-        n = self.destiny_pool.pop()
-        # apply policy to queue
-        self.apply_policy(q, n)
-        # sync queue? not sure if needed, may be needed on high loads but it can introduce more load
-        self.sync_queue(q)
-        # check queue status, slaves should be empty, queue should be moved to new node
-        status = self.check_status(q)
-        # delete policy
-        self.delete_policy(q)
-        # check queue status? or leave it to rabbit to sync itself? (it does sync itself, it takes a couple of seconds)
-        status = self.check_status(q)
-        # add some error catching to reinsert the target into the destiny pool if something fails
-        # do the same for the overloaded? maybe we should just ignore the errors for now? it should be ok to relaunch
-        # this several times so no biggie
+        # start threading here
+        while len(self.queue_pool) > 0 or len(self.destiny_pool) > 0:
+            self.semaphore.acquire()
+            t = threading.Thread(target=self.move_queue)
+            self.log.debug("Starting new thread: {}".format(t.getName()))
+            t.start()
+
+
+        # some housekeeping, if we dont have anymore queues to move that's ok but there may still be
+        # threads doing some work, so find and join them so we wait for them to finish
+        for t in threading.enumerate():
+            if t is threading.currentThread():  # this is the main thread, we cannot join it
+                continue
+            self.log.info("Waiting for thread {} to finish".format(t.getName()))
+            t.join()
 
 
 if __name__ == '__main__':
