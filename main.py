@@ -17,6 +17,7 @@ except ImportError:
     from __builtin__ import range
 import logging
 import threading
+import signal
 
 
 class ConfigNotFound(Exception):
@@ -24,7 +25,17 @@ class ConfigNotFound(Exception):
 
 
 class QueueBalancer:
+    class SignalHandler:
+        def __call__(self, signum, frame):
+            print("Exit called, will wait for running threads to stop before exiting.")
+            for t in threading.enumerate():
+                if t is threading.currentThread():  # this is the main thread, we cannot join it
+                    continue
+                t.join()  # wait for threads to end before exiting
+            exit(0)
+
     def __init__(self):
+        signal.signal(signal.SIGINT, self.SignalHandler())
         self.log = logging.getLogger(__name__)
         ch = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(thread)d - %(levelname)s - %(funcName)s - %(message)s')
