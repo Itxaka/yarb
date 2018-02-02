@@ -51,15 +51,13 @@ class QueueBalancer:
         # we need to replace any / in the vhost
         vhost = vhost.replace("/", "%2f")
         hostname = config.get("default", "hostname")
-        port = config.get("default", "port")
-
-        try:
-            log_level = config.get("default", "log_level")
-        except NoOptionError:
-            log_level = "info"
+        port = config.getint("default", "port")
+        log_level = config.get("default", "log_level")
+        threads = config.getint("default", "threads")
+        self.wait_time = config.getfloat("default", "wait_time")
 
         self.log.setLevel(levels.get(log_level, logging.INFO))
-        self.semaphore = threading.Semaphore(15)
+        self.semaphore = threading.Semaphore(threads)
 
         self.log.debug("Starting program")
         self.log.debug("Got hostname {}".format(hostname))
@@ -195,7 +193,7 @@ class QueueBalancer:
         self.sync_queue(queue_name)
         while self.check_status(queue_name)["node"] != target:
             self.log.debug("Queue {} still not moved to {}".format(queue_name, target))
-            sleep(0.5)
+            sleep(self.wait_time)
 
     def delete_policy(self, queue_name):
         # type: (str) -> None
