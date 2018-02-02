@@ -18,6 +18,7 @@ except ImportError:
 import logging
 import threading
 import signal
+import time
 
 
 class ConfigNotFound(Exception):
@@ -58,7 +59,7 @@ class QueueBalancer:
             log_level = "info"
 
         self.log.setLevel(levels.get(log_level, logging.INFO))
-        self.semaphore = threading.Semaphore(10)
+        self.semaphore = threading.Semaphore(15)
 
         self.log.debug("Starting program")
         self.log.debug("Got hostname {}".format(hostname))
@@ -77,8 +78,15 @@ class QueueBalancer:
         self.policy_url = "{}/api/policies/{}".format(full_host, vhost) + "/{}"
         self.sync_url = "{}/api/queues/{}".format(full_host, vhost) + "/{}/actions"
 
-        self.policy_create = {"pattern": "", "definition": {"ha-mode": "exactly", "ha-params": 1}, "priority": 990, "apply-to": "queues"}
-        self.policy_new_master = {"pattern": "", "definition": {"ha-mode": "nodes", "ha-params": []}, "priority": 992, "apply-to": "queues"}
+        self.policy_new_master = {
+            "pattern": "",
+            "definition": {
+                "ha-mode": "nodes",
+                "ha-params": []
+            },
+            "priority": 990,
+            "apply-to": "queues"
+        }
 
         # using deqes to sync all the things
         # queue_pool is a deqe where the "extra" queues go. Extra queues mean, queues that should not be in that node
@@ -100,8 +108,6 @@ class QueueBalancer:
         # queue to store the nodes that are the destination for extra queues
         self.destiny_pool = deque()
         self.log.debug("Created destiny pool: {}".format(self.destiny_pool))
-        # for easy of use (note(itxaka): for whom? for what?)
-        self.config = config
 
     def load_config(self):
         config_file = expanduser("~/.queue_balancer.conf")
@@ -122,7 +128,6 @@ class QueueBalancer:
 
     def get_queues(self):
         response = self.conn.get(self.queues_url).json()
-        #self.log.debug("Returning response: {}".format(response))
         return response
 
     def ordered_queue_list(self):
@@ -132,11 +137,15 @@ class QueueBalancer:
         :return: a dictionary of hosts and their queues
         """
         queues_ordered_by_host = {}
-        for q in self.get_queues():
-            if q["node"] in queues_ordered_by_host:
-                queues_ordered_by_host[q["node"]].append(q["name"])
+        # FIXME: this assumes that all nodes have at least 1 queue. if they dont they wont appear here.
+        # so maybe a different approach to getting the cluster nodes is preferred (/api/nodes ?)
+        queues = self.get_queues()
+        self.log.info("There is a total of {} queues".format(len(queues)))
+        for queue in queues:
+            if queue["node"] in queues_ordered_by_host:
+                queues_ordered_by_host[queue["node"]].append(queue["name"])
             else:
-                queues_ordered_by_host[q["node"]] = [q["name"]]
+                queues_ordered_by_host[queue["node"]] = [queue["name"]]
         return queues_ordered_by_host
 
     def calculate_queue_distribution(self, queue_list):
@@ -150,7 +159,7 @@ class QueueBalancer:
         proper_distribution = {}
         for node in queue_list:
             proper_distribution[node] = int(len(queue_list[node]) - (total_queues / len(queue_list.keys())))
-        self.log.debug("Optimal distribution calculated is: {}".format(proper_distribution))
+        self.log.info("Optimal distribution calculated is: {}".format(proper_distribution))
         return proper_distribution
 
     def fill_queue_with_overloaded_nodes(self, queues_ordered_by_host, distribution):
@@ -171,49 +180,37 @@ class QueueBalancer:
                 for q in range(extra_queues, 0):
                     self.destiny_pool.append(node)
 
-    def apply_first_policy(self, queue_name):
-        policy_name = self.policy_name(queue_name)
-        # copy, not reference as we are changing it
-        data = copy.deepcopy(self.policy_create)
-        data["pattern"] = "^{}$".format(queue_name)
-        self.log.debug("Applying first policy to {}: {}".format(queue_name, data))
-        # move policy to just 1 mirror (so no slaves)
-        r = self.conn.put(self.policy_url.format(policy_name), json=data)
-        self.log.debug("Got response from first policy change: {}".format(r.status_code))
-
-    def wait_until_slave_nodes_gone(self, queue_name):
-        self.sync_queue(queue_name)
-        while len(self.check_status(queue_name)["slave_nodes"]) > 0:
-            self.log.debug("Queue {} still not ready".format(queue_name))
-            sleep(1)
-
-    def apply_second_policy(self, queue_name, target):
+    def apply_policy(self, queue_name, target):
+        # type: (str, str) -> None
         policy_name = self.policy_name(queue_name)
         data = copy.deepcopy(self.policy_new_master)
         data["definition"]["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
-        self.log.debug("Applying second policy to {}: {}".format(queue_name, data))
+        self.log.debug("Applying policy to {}: {}".format(queue_name, data))
         # move queue into its new master
         self.conn.put(self.policy_url.format(policy_name), json=data)
 
     def wait_until_queue_moved_to_new_master(self, queue_name, target):
+        # type: (str, str) -> None
         self.sync_queue(queue_name)
         while self.check_status(queue_name)["node"] != target:
             self.log.debug("Queue {} still not moved to {}".format(queue_name, target))
-            sleep(1)
+            sleep(0.5)
 
     def delete_policy(self, queue_name):
+        # type: (str) -> None
         policy_name = self.policy_name(queue_name)
         self.log.debug("Deleting policy {}".format(policy_name))
         response = self.conn.delete(self.policy_url.format(policy_name))
         self.log.debug("Response of delete_policy: {}".format(response.status_code))
 
     def check_status(self, queue_name):
+        # type: (str) -> dict
         response = self.conn.get(self.queue_status_url.format(queue_name)).json()
-        #self.log.debug("Status: {}".format(response))
         return response
 
     def sync_queue(self, queue_name):
+        # type: (str) -> None
         response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"})
         self.log.debug("Response from sync_queue: {}".format(response.status_code))
 
@@ -228,6 +225,7 @@ class QueueBalancer:
         self.fill_queue_with_destination_nodes(distribution)
 
     def move_queue(self):
+        start = time.time()
         try:
             # pop queue from the overloaded pool
             queue = self.queue_pool.pop()
@@ -240,16 +238,13 @@ class QueueBalancer:
         except IndexError:
             self.log.info("No more nodes in the destination pool")
             return
-        # apply first policy to queue
-        self.apply_first_policy(queue)
-        # sync queue until slave_pids value is empty
-        self.wait_until_slave_nodes_gone(queue)
-        # check queue status, slaves should be empty, queue should be moved to new node
-        self.apply_second_policy(queue, target)
+        self.log.info("Started moving queue {} to {}".format(queue, target))
+        self.apply_policy(queue, target)
         # wait until the queue has moved to the new master
         self.wait_until_queue_moved_to_new_master(queue, target)
         # delete policy
         self.delete_policy(queue)
+        self.log.info("Finished moving queue {} to {}. It took {} seconds".format(queue, target, time.time() - start))
         self.semaphore.release()
 
     def go(self):
@@ -263,7 +258,6 @@ class QueueBalancer:
             t = threading.Thread(target=self.move_queue)
             self.log.debug("Starting new thread: {}".format(t.getName()))
             t.start()
-
 
         # some housekeeping, if we dont have anymore queues to move that's ok but there may still be
         # threads doing some work, so find and join them so we wait for them to finish
