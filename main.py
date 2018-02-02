@@ -42,7 +42,11 @@ class QueueBalancer:
         formatter = logging.Formatter('%(asctime)s - %(thread)d - %(levelname)s - %(funcName)s - %(message)s')
         ch.setFormatter(formatter)
         self.log.addHandler(ch)
-        levels = {"debug": logging.DEBUG, "info": logging.INFO}
+        levels = {
+            "debug": logging.DEBUG,
+            "info": logging.INFO,
+            "error": logging.ERROR
+        }
 
         config = self.load_config()
         username = config.get("default", "username")

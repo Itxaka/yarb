@@ -5,7 +5,10 @@ except ImportError:
     from unittest.mock import Mock, patch, mock_open
 from main import QueueBalancer
 import io
-from builtins import range
+try:
+    from builtins import range
+except ImportError:
+    from __builtin__ import range
 
 
 class TestQueues(unittest.TestCase):
@@ -39,7 +42,15 @@ class TestQueues(unittest.TestCase):
         ]
 
     def setUp(self):
-        config = u"[default]\nusername = username\npassword = password\nvhost = vhost\nhostname = hostname\nport = port"
+        config = u"""[default]
+username = username
+password = password
+vhost = vhost
+hostname = hostname
+port = 1
+log_level = error
+threads = 1
+wait_time = 1"""
 
         with patch('main.open') as mo:
             mo.__enter__ = Mock(return_value=(Mock(), None))
