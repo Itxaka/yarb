@@ -1,5 +1,6 @@
 language: python
 python:
+  - "2.7"
   - "3.3"
   - "3.4"
   - "3.5"
@@ -7,6 +8,6 @@ python:
 install:
   - pip install -r test-requirements.txt
 script:
-  - coverage run tests.py
+  - coverage run --source=. tests.py
 after_success:
-  - codecov
+  - coveralls

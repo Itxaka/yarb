@@ -1,4 +1,4 @@
 requests
 mock
 future
-coverage
+coveralls
