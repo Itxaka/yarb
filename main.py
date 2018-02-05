@@ -36,6 +36,9 @@ import time
 class ConfigNotFound(Exception):
     pass
 
+class NoMoreQueues(Exception):
+    pass
+
 
 class QueueBalancer:
     class SignalHandler:
@@ -48,6 +51,7 @@ class QueueBalancer:
             exit(0)
 
     def __init__(self):
+        self.action = "delete"
         self.retries = 6  # this number * self.wait_time == total number to wait for the check to expire
         signal.signal(signal.SIGINT, self.SignalHandler())
         self.log = logging.getLogger(__name__)
@@ -90,6 +94,7 @@ class QueueBalancer:
         self.nodes_url = "{}/api/nodes".format(full_host)
         self.queues_url = "{}/api/queues/{}".format(full_host, vhost)
         self.queue_status_url = self.queues_url + "/{}"
+        self.queue_delete_url = self.queues_url + "/{}"
         self.policy_url = "{}/api/policies/{}".format(full_host, vhost) + "/{}"
         self.sync_url = "{}/api/queues/{}".format(full_host, vhost) + "/{}/actions"
 
@@ -259,7 +264,26 @@ class QueueBalancer:
         # fill the destination pool
         self.fill_queue_with_destination_nodes(distribution)
 
-    def move_queue(self):
+    def delete_queue(self, queue_name):
+        response = self.conn.delete(self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5)
+        self.log.debug("Response to delete queue {}: {}".format(queue_name, response.status_code))
+
+    def delete_queue_action(self):
+        start = time.time()
+        try:
+            # pop queue from the overloaded pool
+            queue = self.queue_pool.pop()
+        except IndexError:
+            self.log.info("No more queues in the overloaded pool")
+            self.semaphore.release()
+            raise NoMoreQueues()
+
+        self.delete_queue(queue)
+        sleep(self.wait_time)
+        self.log.info("Finished deleting queue {}. It took {} seconds".format(queue, time.time() - start))
+        self.semaphore.release()
+
+    def move_queue_action(self):
         start = time.time()
         try:
             # pop queue from the overloaded pool
@@ -290,12 +314,20 @@ class QueueBalancer:
         self.prepare()
         self.log.debug("Queue pool has {} items".format(len(self.queue_pool)))
         self.log.debug("Destination pool has {} items".format(len(self.destiny_pool)))
+        self.log.info("Running action {}".format(self.action))
         # start threading here
-        while len(self.queue_pool) > 0 or len(self.destiny_pool) > 0:
-            self.semaphore.acquire()
-            t = threading.Thread(target=self.move_queue)
-            self.log.debug("Starting new thread: {}".format(t.getName()))
-            t.start()
+        if self.action == "delete":
+            while len(self.queue_pool) > 0:
+                self.semaphore.acquire()
+                t = threading.Thread(target=self.delete_queue_action)
+                self.log.debug("Starting new thread: {}".format(t.getName()))
+                t.start()
+        elif self.action == "move":
+            while len(self.queue_pool) > 0 or len(self.destiny_pool) > 0:
+                self.semaphore.acquire()
+                t = threading.Thread(target=self.move_queue_action)
+                self.log.debug("Starting new thread: {}".format(t.getName()))
+                t.start()
 
         # some housekeeping, if we dont have anymore queues to move that's ok but there may still be
         # threads doing some work, so find and join them so we wait for them to finish
@@ -305,7 +337,7 @@ class QueueBalancer:
             self.log.info("Waiting for thread {} to finish".format(t.getName()))
             t.join()
 
-        self.log.info("Finished moving queues. It took {} seconds".format(time.time() - start))
+        self.log.info("Finished action {} on queues. It took {} seconds".format(self.action, time.time() - start))
 
 
 if __name__ == '__main__':
