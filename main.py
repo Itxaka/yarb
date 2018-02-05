@@ -48,6 +48,7 @@ class QueueBalancer:
             exit(0)
 
     def __init__(self):
+        self.retries = 6  # this number * self.wait_time == total number to wait for the check to expire
         signal.signal(signal.SIGINT, self.SignalHandler())
         self.log = logging.getLogger(__name__)
         ch = logging.StreamHandler()
@@ -208,20 +209,24 @@ class QueueBalancer:
 
     def wait_until_queue_moved_to_new_master(self, queue_name, target):
         # type: (str, str) -> None
-        moved = False
-        while not moved:
+        retries = self.retries
+        while True:
+            if retries <= 0:
+                self.log.error("Queue {} expired the number of retries. Skipping it.".format(queue_name))
+                break
             status = self.check_status(queue_name)
             self.log.debug("queue {} status is {}".format(queue_name, status))
             if "error" in status:
                 self.log.error("Found an error while checking queue {}: {}".format(queue_name, status["error"]))
-                # end checking
-                moved = True
+                # end checking, queue might have disappear
+                break
             else:
                 if status["node"] != target:
-                    self.log.info("Queue {} still not moved to {}".format(queue_name, target))
+                    self.log.info("Queue {} still not moved to {}. {} retries left until skipping".format(queue_name, target, retries))
+                    retries -= 1
                     sleep(self.wait_time)
                 else:
-                    moved = True
+                    break
 
     def delete_policy(self, queue_name):
         # type: (str) -> None
