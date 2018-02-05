@@ -41,6 +41,12 @@ class TestQueues(unittest.TestCase):
             {"node": "3", "name": "q5"}
         ]
 
+        cls.nodes_list = [
+            {"name": "1"},
+            {"name": "2"},
+            {"name": "3"}
+        ]
+
     def setUp(self):
         config = u"""[default]
 username = username
@@ -81,8 +87,10 @@ wait_time = 1"""
             self.assertIs(type(distributed[k]), int)
 
     @patch("main.QueueBalancer.get_queues")
-    def test_ordered_queue_list(self, get_queues_mock):
+    @patch("main.QueueBalancer.get_nodes")
+    def test_ordered_queue_list(self, get_nodes_mock, get_queues_mock):
         get_queues_mock.return_value = self.queues_list
+        get_nodes_mock.return_value = self.nodes_list
         # from http api list to nice dictionary
         self.assertEqual(self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]})
 

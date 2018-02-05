@@ -98,7 +98,7 @@ class QueueBalancer:
                 "ha-mode": "nodes",
                 "ha-params": []
             },
-            "priority": 990,
+            "priority": 600,
             "apply-to": "queues"
         }
 
@@ -144,22 +144,24 @@ class QueueBalancer:
         response = self.conn.get(self.queues_url).json()
         return response
 
+    def get_nodes(self):
+        response = self.conn.get(self.nodes_url).json()
+        return response
+
     def ordered_queue_list(self):
         # type: (None) -> dict
         """
 
         :return: a dictionary of hosts and their queues
         """
-        queues_ordered_by_host = {}
         # FIXME: this assumes that all nodes have at least 1 queue. if they dont they wont appear here.
         # so maybe a different approach to getting the cluster nodes is preferred (/api/nodes ?)
         queues = self.get_queues()
+        nodes = self.get_nodes()
+        queues_ordered_by_host = {node["name"]: [] for node in nodes}
         self.log.info("There is a total of {} queues".format(len(queues)))
         for queue in queues:
-            if queue["node"] in queues_ordered_by_host:
-                queues_ordered_by_host[queue["node"]].append(queue["name"])
-            else:
-                queues_ordered_by_host[queue["node"]] = [queue["name"]]
+            queues_ordered_by_host[queue["node"]].append(queue["name"])
         return queues_ordered_by_host
 
     def calculate_queue_distribution(self, queue_list):
@@ -200,31 +202,45 @@ class QueueBalancer:
         data = copy.deepcopy(self.policy_new_master)
         data["definition"]["ha-params"] = [target]
         data["pattern"] = "^{}$".format(queue_name)
-        self.log.debug("Applying policy to {}: {}".format(queue_name, data))
+        self.log.info("Applying policy to {}: {}".format(queue_name, data))
         # move queue into its new master
         self.conn.put(self.policy_url.format(policy_name), json=data)
 
     def wait_until_queue_moved_to_new_master(self, queue_name, target):
         # type: (str, str) -> None
-        self.sync_queue(queue_name)
-        while self.check_status(queue_name)["node"] != target:
-            self.log.debug("Queue {} still not moved to {}".format(queue_name, target))
-            sleep(self.wait_time)
+        moved = False
+        while not moved:
+            status = self.check_status(queue_name)
+            self.log.debug("queue {} status is {}".format(queue_name, status))
+            if "error" in status:
+                self.log.error("Found an error while checking queue {}: {}".format(queue_name, status["error"]))
+                # end checking
+                moved = True
+            else:
+                if status["node"] != target:
+                    self.log.info("Queue {} still not moved to {}".format(queue_name, target))
+                    sleep(self.wait_time)
+                else:
+                    moved = True
 
     def delete_policy(self, queue_name):
         # type: (str) -> None
         policy_name = self.policy_name(queue_name)
-        self.log.debug("Deleting policy {}".format(policy_name))
+        self.log.info("Deleting policy {}".format(policy_name))
         response = self.conn.delete(self.policy_url.format(policy_name))
         self.log.debug("Response of delete_policy: {}".format(response.status_code))
 
     def check_status(self, queue_name):
         # type: (str) -> dict
-        response = self.conn.get(self.queue_status_url.format(queue_name)).json()
+        try:
+            response = self.conn.get(self.queue_status_url.format(queue_name)).json()
+        except requests.ConnectionError:
+            response = {"error": "Connection error"}
         return response
 
     def sync_queue(self, queue_name):
         # type: (str) -> None
+        self.log.info("Syncing queue {}".format(queue_name))
         response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"})
         self.log.debug("Response from sync_queue: {}".format(response.status_code))
 
@@ -245,12 +261,14 @@ class QueueBalancer:
             queue = self.queue_pool.pop()
         except IndexError:
             self.log.info("No more queues in the overloaded pool")
+            self.semaphore.release()
             return
         try:
             # pop node from the destiny pool
             target = self.destiny_pool.pop()
         except IndexError:
             self.log.info("No more nodes in the destination pool")
+            self.semaphore.release()
             return
         self.log.info("Started moving queue {} to {}".format(queue, target))
         self.apply_policy(queue, target)
@@ -262,7 +280,8 @@ class QueueBalancer:
         self.semaphore.release()
 
     def go(self):
-        self.log.debug("Starting queue balancing")
+        start = time.time()
+        self.log.info("Starting queue balancing")
         self.prepare()
         self.log.debug("Queue pool has {} items".format(len(self.queue_pool)))
         self.log.debug("Destination pool has {} items".format(len(self.destiny_pool)))
@@ -280,6 +299,8 @@ class QueueBalancer:
                 continue
             self.log.info("Waiting for thread {} to finish".format(t.getName()))
             t.join()
+
+        self.log.info("Finished moving queues. It took {} seconds".format(time.time() - start))
 
 
 if __name__ == '__main__':
