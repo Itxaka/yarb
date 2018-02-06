@@ -107,19 +107,6 @@ wait_time = 1"""
         # should not be anything else in the queue left
         self.assertRaises(IndexError, self.balancer.queue_pool.popleft)
 
-    def test_destination_pool(self):
-        # should raise IndexError as the queue is empty
-        self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
-        self.balancer.fill_queue_with_destination_nodes({"node1": 5, "node2": 0, "node3": -4, "node4": -1})
-        # should have inserted node3 4 times and node4 once
-        nodes = [self.balancer.destiny_pool.pop() for _ in range(0, 5)]
-        self.assertIn("node3", nodes)
-        self.assertEqual(4, len([n for n in nodes if n == "node3"]))
-        self.assertIn("node4", nodes)
-        self.assertEqual(1, len([n for n in nodes if n == "node4"]))
-        # should raise IndexError as the queue is empty
-        self.assertRaises(IndexError, self.balancer.destiny_pool.pop)
-
 
 if __name__ == '__main__':
     unittest.main()

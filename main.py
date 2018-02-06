@@ -10,8 +10,6 @@
 # limitations under the License.
 #
 
-from time import sleep
-
 import requests
 try:
     from ConfigParser import ConfigParser, NoOptionError
@@ -22,7 +20,6 @@ try:
     from Queue import deque
 except ImportError:
     from queue import deque
-import copy
 try:
     from builtins import range
 except ImportError:
@@ -34,9 +31,6 @@ import time
 
 
 class ConfigNotFound(Exception):
-    pass
-
-class NoMoreQueues(Exception):
     pass
 
 
@@ -51,8 +45,6 @@ class QueueBalancer:
             exit(0)
 
     def __init__(self):
-        self.action = "delete"
-        self.retries = 6  # this number * self.wait_time == total number to wait for the check to expire
         signal.signal(signal.SIGINT, self.SignalHandler())
         self.log = logging.getLogger(__name__)
         ch = logging.StreamHandler()
@@ -95,18 +87,6 @@ class QueueBalancer:
         self.queues_url = "{}/api/queues/{}".format(full_host, vhost)
         self.queue_status_url = self.queues_url + "/{}"
         self.queue_delete_url = self.queues_url + "/{}"
-        self.policy_url = "{}/api/policies/{}".format(full_host, vhost) + "/{}"
-        self.sync_url = "{}/api/queues/{}".format(full_host, vhost) + "/{}/actions"
-
-        self.policy_new_master = {
-            "pattern": "",
-            "definition": {
-                "ha-mode": "nodes",
-                "ha-params": []
-            },
-            "priority": 600,
-            "apply-to": "queues"
-        }
 
         # using deqes to sync all the things
         # queue_pool is a deqe where the "extra" queues go. Extra queues mean, queues that should not be in that node
@@ -114,20 +94,12 @@ class QueueBalancer:
         # so a node with 20 queues, in a 3-node cluster with 30 queues in total would have:
         # 30/3 = 10 - 20 = +10 (patent pending on this incredible algorithm)
         # this indicates that for the optimal balance this node should get rid of 10 queues
-        # those 10 queues, we pick at random* from the node and store them in the pool so we can pop queues from there
-        # and work on them safely
+        # those 10 queues, we pick at random* from the node and store them in the pool
         # * not really random right now, sue me.
 
-        # queue to store the nodes that have extra queues on them
+        # queue to store the queues to be deleted
         self.queue_pool = deque()
         self.log.debug("Created queue pool: {}".format(self.queue_pool))
-
-        # destiny pool is a more simple deque which contains the target nodes for moving the queues to
-        # the values are calculated as above but this are the ones that get a negative value, indicating
-        # that they are missing a number of queues to reach the optimal balance(tm)
-        # queue to store the nodes that are the destination for extra queues
-        self.destiny_pool = deque()
-        self.log.debug("Created destiny pool: {}".format(self.destiny_pool))
 
     def load_config(self):
         config_file = expanduser("~/.queue_balancer.conf")
@@ -141,10 +113,6 @@ class QueueBalancer:
             raise ConfigNotFound("File {} with the config not found.".format(config_file))
 
         return config
-
-    @staticmethod
-    def policy_name(queue_name):
-        return "{}-balancer-temp".format(queue_name)
 
     def get_queues(self):
         response = self.conn.get(self.queues_url).json()
@@ -192,83 +160,22 @@ class QueueBalancer:
                 for q in range(0, extra_queues):
                     self.queue_pool.append(queues_ordered_by_host[node][q])
 
-    def fill_queue_with_destination_nodes(self, distribution):
-        # type: (dict) -> None
-        for node, extra_queues in distribution.items():
-            if extra_queues < 0:
-                self.log.debug(
-                    "Found that node {} has {} missing queues, adding to destiny pool".format(node, abs(extra_queues))
-                )
-                for q in range(extra_queues, 0):
-                    self.destiny_pool.append(node)
-
-    def apply_policy(self, queue_name, target):
-        # type: (str, str) -> None
-        policy_name = self.policy_name(queue_name)
-        data = copy.deepcopy(self.policy_new_master)
-        data["definition"]["ha-params"] = [target]
-        data["pattern"] = "^{}$".format(queue_name)
-        self.log.info("Applying policy to {}: {}".format(queue_name, data))
-        # move queue into its new master
-        self.conn.put(self.policy_url.format(policy_name), json=data)
-
-    def wait_until_queue_moved_to_new_master(self, queue_name, target):
-        # type: (str, str) -> None
-        retries = self.retries
-        while True:
-            if retries <= 0:
-                self.log.error("Queue {} expired the number of retries. Skipping it.".format(queue_name))
-                break
-            status = self.check_status(queue_name)
-            self.log.debug("queue {} status is {}".format(queue_name, status))
-            if "error" in status:
-                self.log.error("Found an error while checking queue {}: {}".format(queue_name, status["error"]))
-                # end checking, queue might have disappear
-                break
-            else:
-                if status["node"] != target:
-                    self.log.info("Queue {} still not moved to {}. {} retries left until skipping".format(queue_name, target, retries))
-                    retries -= 1
-                    sleep(self.wait_time)
-                else:
-                    break
-
-    def delete_policy(self, queue_name):
-        # type: (str) -> None
-        policy_name = self.policy_name(queue_name)
-        self.log.info("Deleting policy {}".format(policy_name))
-        response = self.conn.delete(self.policy_url.format(policy_name))
-        self.log.debug("Response of delete_policy: {}".format(response.status_code))
-
-    def check_status(self, queue_name):
-        # type: (str) -> dict
-        try:
-            response = self.conn.get(self.queue_status_url.format(queue_name)).json()
-        except requests.ConnectionError:
-            response = {"error": "Connection error"}
-        return response
-
-    def sync_queue(self, queue_name):
-        # type: (str) -> None
-        self.log.info("Syncing queue {}".format(queue_name))
-        response = self.conn.post(self.sync_url.format(queue_name), json={"action": "sync"})
-        self.log.debug("Response from sync_queue: {}".format(response.status_code))
-
     def prepare(self):
+        # type: (None) -> None
         # get ordered queues
         queues = self.ordered_queue_list()
         # obtain the optimal distribution
         distribution = self.calculate_queue_distribution(queues)
         # fill the overloaded pool
         self.fill_queue_with_overloaded_nodes(queues, distribution)
-        # fill the destination pool
-        self.fill_queue_with_destination_nodes(distribution)
 
     def delete_queue(self, queue_name):
+        # type: (str) -> None
         response = self.conn.delete(self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5)
         self.log.debug("Response to delete queue {}: {}".format(queue_name, response.status_code))
 
     def delete_queue_action(self):
+        # type: (None) -> None
         start = time.time()
         try:
             # pop queue from the overloaded pool
@@ -276,58 +183,25 @@ class QueueBalancer:
         except IndexError:
             self.log.info("No more queues in the overloaded pool")
             self.semaphore.release()
-            raise NoMoreQueues()
+            return
 
         self.delete_queue(queue)
-        sleep(self.wait_time)
+        time.sleep(self.wait_time)
         self.log.info("Finished deleting queue {}. It took {} seconds".format(queue, time.time() - start))
         self.semaphore.release()
 
-    def move_queue_action(self):
-        start = time.time()
-        try:
-            # pop queue from the overloaded pool
-            queue = self.queue_pool.pop()
-        except IndexError:
-            self.log.info("No more queues in the overloaded pool")
-            self.semaphore.release()
-            return
-        try:
-            # pop node from the destiny pool
-            target = self.destiny_pool.pop()
-        except IndexError:
-            self.log.info("No more nodes in the destination pool")
-            self.semaphore.release()
-            return
-        self.log.info("Started moving queue {} to {}".format(queue, target))
-        self.apply_policy(queue, target)
-        # wait until the queue has moved to the new master
-        self.wait_until_queue_moved_to_new_master(queue, target)
-        # delete policy
-        self.delete_policy(queue)
-        self.log.info("Finished moving queue {} to {}. It took {} seconds".format(queue, target, time.time() - start))
-        self.semaphore.release()
-
     def go(self):
+        # type: (None) -> None
         start = time.time()
         self.log.info("Starting queue balancing")
         self.prepare()
         self.log.debug("Queue pool has {} items".format(len(self.queue_pool)))
-        self.log.debug("Destination pool has {} items".format(len(self.destiny_pool)))
-        self.log.info("Running action {}".format(self.action))
         # start threading here
-        if self.action == "delete":
-            while len(self.queue_pool) > 0:
-                self.semaphore.acquire()
-                t = threading.Thread(target=self.delete_queue_action)
-                self.log.debug("Starting new thread: {}".format(t.getName()))
-                t.start()
-        elif self.action == "move":
-            while len(self.queue_pool) > 0 or len(self.destiny_pool) > 0:
-                self.semaphore.acquire()
-                t = threading.Thread(target=self.move_queue_action)
-                self.log.debug("Starting new thread: {}".format(t.getName()))
-                t.start()
+        while len(self.queue_pool) > 0:
+            self.semaphore.acquire()
+            t = threading.Thread(target=self.delete_queue_action)
+            self.log.debug("Starting new thread: {}".format(t.getName()))
+            t.start()
 
         # some housekeeping, if we dont have anymore queues to move that's ok but there may still be
         # threads doing some work, so find and join them so we wait for them to finish
@@ -337,7 +211,7 @@ class QueueBalancer:
             self.log.info("Waiting for thread {} to finish".format(t.getName()))
             t.join()
 
-        self.log.info("Finished action {} on queues. It took {} seconds".format(self.action, time.time() - start))
+        self.log.info("Finished deleting queues. It took {} seconds".format(time.time() - start))
 
 
 if __name__ == '__main__':
