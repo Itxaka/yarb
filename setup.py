@@ -14,7 +14,7 @@ setup(
         ],
     },
     install_requires=["requests"],
-    tests_require=["requests", "mock", "coveralls"],
+    tests_require=["requests", "mock"],
     package_data={"": ["LICENSE", "README.md"]},
     classifiers=[
         "Programming Language :: Python",

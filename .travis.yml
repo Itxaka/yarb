@@ -1,6 +1,7 @@
 sudo: false
 cache: pip
 language: python
+before_install: pip install coveralls
 python:
   - "2.7"
   - "3.6"
@@ -11,6 +12,7 @@ matrix:
       before_install: pip install pycodestyle
       script: pycodestyle
       env: pep8
+      after_success: true
 script:
   - coverage run setup.py test
 after_success:
