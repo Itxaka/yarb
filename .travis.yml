@@ -1,3 +1,5 @@
+sudo: false
+cache: pip
 language: python
 python:
   - "2.7"
@@ -5,9 +7,14 @@ python:
   - "3.4"
   - "3.5"
   - "3.6"
-install:
-  - pip install -r test-requirements.txt
+install: pip install coverage
+matrix:
+  include:
+    - python: "2.7"
+      before_install: pip install pycodestyle
+      script: pycodestyle
+      env: pep8
 script:
-  - coverage run --source=. tests.py
+  - coverage run --source=yarb setup.py test
 after_success:
   - coveralls

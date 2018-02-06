@@ -42,7 +42,8 @@ class QueueBalancer:
                 if t is threading.currentThread():  # this is the main thread, we cannot join it
                     continue
                 t.join()  # wait for threads to end before exiting
-            exit(0)
+            # 128+2 SIGINT <http://www.tldp.org/LDP/abs/html/exitcodes.html>
+            exit(130)
 
     def __init__(self):
         signal.signal(signal.SIGINT, self.SignalHandler())
@@ -214,6 +215,6 @@ class QueueBalancer:
         self.log.info("Finished deleting queues. It took {} seconds".format(time.time() - start))
 
 
-if __name__ == '__main__':
+def main():
     q = QueueBalancer()
     q.go()

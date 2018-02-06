@@ -1,9 +1,6 @@
 import unittest
-try:
-    from mock import Mock, patch, mock_open
-except ImportError:
-    from unittest.mock import Mock, patch, mock_open
-from main import QueueBalancer
+from mock import Mock, patch, mock_open
+from yarb.yarb import QueueBalancer
 import io
 try:
     from builtins import range
@@ -58,7 +55,7 @@ log_level = error
 threads = 1
 wait_time = 1"""
 
-        with patch('main.open') as mo:
+        with patch('yarb.yarb.open') as mo:
             mo.__enter__ = Mock(return_value=(Mock(), None))
             mo.__exit__ = Mock(return_value=None)
             mo.return_value = io.StringIO(config)
@@ -86,8 +83,8 @@ wait_time = 1"""
         for k in distributed.keys():
             self.assertIs(type(distributed[k]), int)
 
-    @patch("main.QueueBalancer.get_queues")
-    @patch("main.QueueBalancer.get_nodes")
+    @patch("yarb.yarb.QueueBalancer.get_queues")
+    @patch("yarb.yarb.QueueBalancer.get_nodes")
     def test_ordered_queue_list(self, get_nodes_mock, get_queues_mock):
         get_queues_mock.return_value = self.queues_list
         get_nodes_mock.return_value = self.nodes_list
