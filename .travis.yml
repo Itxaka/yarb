@@ -3,9 +3,6 @@ cache: pip
 language: python
 python:
   - "2.7"
-  - "3.3"
-  - "3.4"
-  - "3.5"
   - "3.6"
 install: pip install coverage
 matrix:
@@ -15,6 +12,6 @@ matrix:
       script: pycodestyle
       env: pep8
 script:
-  - coverage run --source=yarb setup.py test
+  - coverage run setup.py test
 after_success:
   - coveralls
