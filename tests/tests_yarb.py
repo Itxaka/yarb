@@ -89,12 +89,17 @@ wait_time = 1"""
         get_queues_mock.return_value = self.queues_list
         get_nodes_mock.return_value = self.nodes_list
         # from http api list to nice dictionary
-        self.assertEqual(self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]})
+        self.assertEqual(
+            self.balancer.ordered_queue_list(), {"1": ["q1", "q2", "q3"], "3": ["q5"], "2": ["q4"]}
+        )
 
     def test_queue_pool(self):
         # should raise IndexError as the queue is empty
         self.assertRaises(IndexError, self.balancer.queue_pool.pop)
-        self.balancer.fill_queue_with_overloaded_nodes(self.unbalanced_queue_list, {"node1": 4, "node2": -2, "node3": -2})
+        self.balancer.fill_queue_with_overloaded_nodes(
+            self.unbalanced_queue_list,
+            {"node1": 4, "node2": -2, "node3": -2}
+        )
         # should have inserted the q1 to q4 queues
         queues = [self.balancer.queue_pool.pop() for _ in range(0, 4)]
         self.assertIn("q1", queues)

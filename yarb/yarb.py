@@ -49,7 +49,9 @@ class QueueBalancer:
         signal.signal(signal.SIGINT, self.SignalHandler())
         self.log = logging.getLogger(__name__)
         ch = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(thread)d - %(levelname)s - %(funcName)s - %(message)s')
+        formatter = logging.Formatter(
+            '%(asctime)s - %(thread)d - %(levelname)s - %(funcName)s - %(message)s'
+        )
         ch.setFormatter(formatter)
         self.log.addHandler(ch)
         levels = {
@@ -90,10 +92,10 @@ class QueueBalancer:
         self.queue_delete_url = self.queues_url + "/{}"
 
         # using deqes to sync all the things
-        # queue_pool is a deqe where the "extra" queues go. Extra queues mean, queues that should not be in that node
-        # because they are over the total_queues divided by the number of nodes minus the current queues in the node
-        # so a node with 20 queues, in a 3-node cluster with 30 queues in total would have:
-        # 30/3 = 10 - 20 = +10 (patent pending on this incredible algorithm)
+        # queue_pool is a deqe where the "extra" queues go. Extra queues mean, queues that should
+        # not be in that node because they are over the total_queues divided by the number of
+        # nodes minus the current queues in the node so a node with 20 queues, in a 3-node cluster
+        # with 30 queues in total would have: 30/3 = 10 - 20 = +10
         # this indicates that for the optimal balance this node should get rid of 10 queues
         # those 10 queues, we pick at random* from the node and store them in the pool
         # * not really random right now, sue me.
@@ -129,8 +131,6 @@ class QueueBalancer:
 
         :return: a dictionary of hosts and their queues
         """
-        # FIXME: this assumes that all nodes have at least 1 queue. if they dont they wont appear here.
-        # so maybe a different approach to getting the cluster nodes is preferred (/api/nodes ?)
         queues = self.get_queues()
         nodes = self.get_nodes()
         queues_ordered_by_host = {node["name"]: [] for node in nodes}
@@ -146,18 +146,22 @@ class QueueBalancer:
         :param queue_list: an ordered list of queues ordered by host
         :return: a dict with how many queues needs to be removed/added to each host
         """
-        total_queues = sum([len(queue_list[i]) for i in queue_list])
-        proper_distribution = {}
+        total = sum([len(queue_list[i]) for i in queue_list])
+        distribution = {}
         for node in queue_list:
-            proper_distribution[node] = int(len(queue_list[node]) - (total_queues / len(queue_list.keys())))
-        self.log.info("Optimal distribution calculated is: {}".format(proper_distribution))
-        return proper_distribution
+            distribution[node] = int(len(queue_list[node]) - (total / len(queue_list.keys())))
+        self.log.info("Optimal distribution calculated is: {}".format(distribution))
+        return distribution
 
     def fill_queue_with_overloaded_nodes(self, queues_ordered_by_host, distribution):
         # type: (dict) -> None
         for node, extra_queues in distribution.items():
             if extra_queues > 0:
-                self.log.debug("Found that node {} has {} extra queues, adding to queue pool".format(node, extra_queues))
+                self.log.debug(
+                    "Found that node {} has {} extra queues, adding to queue pool".format(
+                        node, extra_queues
+                    )
+                )
                 for q in range(0, extra_queues):
                     self.queue_pool.append(queues_ordered_by_host[node][q])
 
@@ -172,7 +176,9 @@ class QueueBalancer:
 
     def delete_queue(self, queue_name):
         # type: (str) -> None
-        response = self.conn.delete(self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5)
+        response = self.conn.delete(
+            self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5
+        )
         self.log.debug("Response to delete queue {}: {}".format(queue_name, response.status_code))
 
     def delete_queue_action(self):
@@ -188,7 +194,9 @@ class QueueBalancer:
 
         self.delete_queue(queue)
         time.sleep(self.wait_time)
-        self.log.info("Finished deleting queue {}. It took {} seconds".format(queue, time.time() - start))
+        self.log.info(
+            "Finished deleting queue {}. It took {} seconds".format(queue, time.time() - start)
+        )
         self.semaphore.release()
 
     def go(self):
