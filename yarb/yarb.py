@@ -176,10 +176,15 @@ class QueueBalancer:
 
     def delete_queue(self, queue_name):
         # type: (str) -> None
-        response = self.conn.delete(
-            self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5
-        )
-        self.log.debug("Response to delete queue {}: {}".format(queue_name, response.status_code))
+        try:
+            response = self.conn.delete(
+                self.queue_delete_url.format(queue_name), params={"if-empty": "true"}, timeout=5
+            )
+            self.log.debug(
+                "Response to delete queue {}: {}".format(queue_name, response.status_code)
+            )
+        except requests.Timeout:
+            self.log.error("Response to delete queue {} timed out, skipping.")
 
     def delete_queue_action(self):
         # type: (None) -> None
