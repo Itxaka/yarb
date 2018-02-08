@@ -118,8 +118,14 @@ class QueueBalancer:
         return config
 
     def get_queues(self):
-        response = self.conn.get(self.queues_url).json()
-        return response
+        response = self.conn.get(self.queues_url)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            raise Exception(
+                "Received a 401 http error. Are your username/password options correct? "
+                "Do your user has the 'administrator' tag?"
+            )
 
     def get_nodes(self):
         response = self.conn.get(self.nodes_url).json()
