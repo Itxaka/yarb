@@ -1,0 +1,17 @@
+[default]
+# user with the administrator tag
+username = username
+# password for the user
+password = password
+# vhost
+vhost = vhost
+# hostname
+hostname = hostname
+# port, usually 15672
+port = 15672
+# log level, valid options are error, info, debug
+log_level = error
+# how many threads to use to delete the queues, careful as this has a performance hit on the cluster
+threads = 1
+# how mmuch time to wait between launching a new queue after one has finished
+wait_time = 1

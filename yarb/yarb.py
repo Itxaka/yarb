@@ -105,7 +105,7 @@ class QueueBalancer:
         self.log.debug("Created queue pool: {}".format(self.queue_pool))
 
     def load_config(self):
-        config_file = expanduser("~/.queue_balancer.conf")
+        config_file = expanduser("~/.yarb.conf")
         config = ConfigParser()
 
         try:
