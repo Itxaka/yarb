@@ -16,18 +16,18 @@ How does yarb works?
 
  - Calculates the optimal distribution and only applies to extra queues
 
-> There is no need to maunally search for the queues that need moving or to do any actions to all of them. Yarb will check the total number of queues in the cluster, know how many are over or under in a given node and just apply actions on those, making it much faster
+> There is no need to manually search for the queues that need moving or to do any actions to all of them. Yarb will check the total number of queues in the cluster, know how many are over or under in a given node and just apply actions on those, making it much faster
 
 
  - Uses threading to do many queues on parallel
 
-> As it uses the HTTP-API from the rabbitmq-management plugin, we can do hundreds of requests at the same time. Other tools just do actions sequentally which is not viable on environments with a high number of queues. Threading number is user configurable so you can go as low as you want to avoid affecting the cluster performance.
+> As it uses the HTTP-API from the rabbitmq-management plugin, we can do hundreds of requests at the same time. Other tools just do actions sequentially which is not viable on environments with a high number of queues. Threading number is user configurable so you can go as low as you want to avoid affecting the cluster performance.
 
  - Deletes queues that are empty
  
- > If your client is written properly, when connection it will declare the queue, and it will reconnect on failure. This means we can safely delete a queue that has 0 messges and clients will reconnect instantly and recreate the queue. On queue recreation, rabbitmq `queue_master_locator` will trigger in at it will be balanced according to your configuration, with the whole cluster up, so it will be properly set on the appropiate node. **This only works if your clients reconnect automatically, which they should do**
+ > If your client is written properly, when connection it will declare the queue, and it will reconnect on failure. This means we can safely delete a queue that has 0 messages and clients will reconnect instantly and recreate the queue. On queue recreation, rabbitmq `queue_master_locator` will trigger in at it will be balanced according to your configuration, with the whole cluster up, so it will be properly set on the appropriate node. **This only works if your clients reconnect automatically, which they should do**
  
- Thats it! There is not much to it, as it should be simple and fast.
+ That's it! There is not much to it, as it should be simple and fast.
  
  
  Caveats
@@ -35,7 +35,7 @@ How does yarb works?
  
  The user configured for yarb should have the `administrator` tag, as listing the nodes in a cluster and deleting queues its and administrator-level task. You can find how to add tags here[4]
  
- There is a hit to performance when running the script and when deleting a high number of queues in paralel with low wait times (<= 1 second) so always try to run the script from outside the cluster and do some testing on the correct number of threads that you should use, bumping it if there is room for it.
+ There is a hit to performance when running the script and when deleting a high number of queues in parallel with low wait times (<= 1 second) so always try to run the script from outside the cluster and do some testing on the correct number of threads that you should use, bumping it if there is room for it.
  
  
  Configuration
