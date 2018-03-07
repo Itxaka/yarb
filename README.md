@@ -2,9 +2,12 @@
 Yet Another Rabbit Balancer
 
 
+[![Coverage Status](https://coveralls.io/repos/github/Itxaka/yarb/badge.svg?branch=master)](https://coveralls.io/github/Itxaka/yarb?branch=master) [![Build Status](https://travis-ci.org/Itxaka/yarb.svg?branch=master)](https://travis-ci.org/Itxaka/yarb) ![PyPI - License](https://img.shields.io/pypi/l/yarb.svg) [![PyPI](https://img.shields.io/pypi/v/yarb.svg)](https://pypi.org/project/yarb/) ![GitHub tag](https://img.shields.io/github/tag/itxaka/yarb.svg) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/yarb.svg)](https://pypi.org/project/yarb/)
+
+
 This script tackles the issue of unbalanced queues in a rabbitmq mirrored cluster.
 
-Usually if all your nodes are running all the time, your queues will be balanced alrigth, but after a node failure, or even a cluster failure, there is usually one node (lets call it master) that comes before the other ones. This is reflected in the rabbitmq OCF agent[0] as well, which will bring one node as master and then restart the rest of the nodes to join the master.
+Usually if all your nodes are running all the time, your queues will be balanced alright, but after a node failure, or even a cluster failure, there is usually one node (lets call it master) that comes before the other ones. This is reflected in the rabbitmq OCF agent[0] as well, which will bring one node as master and then restart the rest of the nodes to join the master.
 
 In environments where the clients have a short reconnection retry, this usually ends up making the master the node which receives all connections and creates all queues, marking itself as the queue master because the other nodes are still not up. This makes the whole cluster really unbalanced and can lead to the master node being overwhelmed, as it has to deal with all the queues and connections.
 

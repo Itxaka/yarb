@@ -6,6 +6,7 @@ setup(
     description="Yet Another Rabbit Balancer",
     author="Itxaka Serrano Garcia",
     author_email="igarcia@suse.com",
+    url="https://github.com/Itxaka/yarb",
     license="GPL2.0",
     packages=["yarb"],
     entry_points={
